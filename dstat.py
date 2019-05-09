@@ -1,17 +1,51 @@
 #!/usr/bin/python
 
 
+__author__ = 'newuser'
+
 from Bio import AlignIO, SeqIO, Align
 from sys import argv
 import argparse
 from os.path import basename, dirname
 from math import factorial
+from pybedtools import BedTool
+from itertools import chain
 
 
-blocksize = 5000000  # 5Mb
+
+blocksize = 100000  # 5Mb
+
+
+
+class BedToolPositions:
+    def __init__(self):
+        self.list_of_positions = []
+        self.taxon_sequence = ()
+
+    def add_feature(self, chr, pos, type):
+
+        if not self.taxon_sequence:
+            print "Error: No Taxon sequence set"
+            return 0
+        self.seq_generator = (i for i in self.taxon_sequence)
+        combination = "h%i-h%i-h%i" %(self.seq_generator.next()+1 , self.seq_generator.next()+1 , self.seq_generator.next()+1)
+        self.list_of_positions.append((chr, pos, pos + 1, type, combination))
+        return 1
+
+
+    def write_to_BED(self, out_fname):
+        bt = BedTool(self.list_of_positions)
+        bt.moveto(out_fname)
+        return 1
+
+
+
+
+
 
 
 def do_abbababa(alignment, anc_sequence):
+
     i = 0
     chr = alignment[0].id
     n = len(alignment)
@@ -31,22 +65,31 @@ def do_abbababa(alignment, anc_sequence):
                     if (h1 == h3) or (h1 >= h2):
                         continue
                     print "combination %i of %i" %(c+1, (factorial(n)/2))
+                    bt_positions.taxon_sequence = (h1, h2, h3)
                     c += 1
                     #print h1,h2,h3
                     abba = 0
                     baba = 0
                     bbaa = 0
+                    snv = 0
 
 
                     for j in range(len(block[1])):  # iterate over sites in alignments
+
+
 
                         s1 = block[h1, j]
                         s2 = block[h2, j]
                         s3 = block[h3, j]
                         s_anc = anc_block[0, j]
+
+
                         # print set([h1, h2, h3, h4])
-                        if len({s1, s2, s3, s_anc}) != 2:
+
+                        #if len(set)
+                        if len(set([s1, s2, s3, s_anc])) < 2:
                             continue  # site not biallelic
+
                         badchar = False
                         for site in [s1, s2, s3, s_anc]:  # check for N and ambiguities
                             if site in "NYRKMWSBDHV-":
@@ -59,13 +102,19 @@ def do_abbababa(alignment, anc_sequence):
                             continue
                         if (s1 == s2) and s3 == s_anc and s1 != s3 and s2 != s_anc:
                                     bbaa += 1
+                                    snv += 1
+                                    bt_positions.add_feature(chr, i+j, "BBAA")
+
                         elif s1 != s2 and s3 != s_anc:
                             if s1 == s3 and s2 == s_anc:
                                 baba += 1
+                                bt_positions.add_feature(chr, i+j, "BABA")
                             elif s2 == s3 and s1 == s_anc:
                                 abba += 1
+                                bt_positions.add_feature(chr, i+j, "ABBA")
                         else:
-                            continue
+                            snv += 1
+                            bt_positions.add_feature(chr, i+j, "SNV") # add non ABBABABA or BBAA SNV
                     f_ab.write("\t%i\t%i" % (abba, baba))
                     f_extra.write("\t%i\t%i\t%i" % (abba, baba, bbaa))
         f_ab.write("\n")
@@ -77,7 +126,7 @@ def do_abbababa(alignment, anc_sequence):
 
 
 def main():
-    global f_ab, f_extra
+    global f_ab, f_extra, bt_positions
     seqs = {}
     records = []
     fname_list = [basename(fpath) for fpath in options.input_files]
@@ -99,6 +148,7 @@ def main():
     records = set([str(r) for r in records])
     f_ab = open(options.output, "w")
     f_extra = open(options.extra, "w")
+    bt_positions = BedToolPositions()
     for record in sorted(records):
         sequences = []
         # min_alignment_length = min([len(seqs.get(seq_key).get(record)) for seq_key in fname_list] +
@@ -113,7 +163,7 @@ def main():
 
         do_abbababa(per_chr_alignment, anc.get(record)[:min_alignment_length])
 
-
+    bt_positions.write_to_BED(options.bed_out)
     f_ab.close()
     f_extra.close()
 
@@ -122,9 +172,11 @@ def main():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="This is ABBABABA")
-    parser.add_argument('-i', '--input_files', required=True,c help='Input files')
+    parser.add_argument('-i', '--input_files', required=True, action="append", help='Input files')
     parser.add_argument('-a', '--anc', required=True, help='ancestral fasta')
+
     parser.add_argument('-o', '--output', required=True, help='*abbababba outputfile')
+    parser.add_argument('-b', '--bed_out', required=True, help='*bed outputfile')
     parser.add_argument('-e', '--extra', required=True, help='*abbababbabbaa outputfile')
 
     options = parser.parse_args()
